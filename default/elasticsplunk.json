@@ -1,0 +1,17 @@
+{
+	"cluster1":{
+		"hosts": ["node1:9200", "node2:9200", "node3:9200"],
+		"tsfield": "@timestamp",
+		"use_ssl": false,
+		"verify_certs": false
+	},
+
+	"cluster2":{
+		"hosts": ["https://node1/elastic", "https://node2/elastic", "https://node3/elastic"],
+		"tsfield": "time",
+		"use_ssl": true,
+		"verify_certs": true,
+        "ca_cert": "/path/to/cert/ca.pem"
+	}
+}
+
