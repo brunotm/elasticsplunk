@@ -167,7 +167,6 @@ class ElasticSplunk(GeneratingCommand):
 
         # Get search config
         config = self._get_search_config()
-        print(config)
 
         # Search body
         # query-string-syntax
