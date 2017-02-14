@@ -4,7 +4,7 @@ ElasticSplunk Search Command
 A Search command to explore Elasticsearch data within Splunk.
 
 # Currently supported
-- Multiple cluster node search (elasticsearch-py)
+- Multiple cluster node search
 - Index Specification
 - SSL connections
 - Scroll searches
@@ -12,6 +12,10 @@ A Search command to explore Elasticsearch data within Splunk.
 - Splunk timepicker values
 - Relative time values
 - Time stamp field specification
+
+# Included
+- elasticsearch-py
+- splunklib from the splunk-sdk-python
 
 # Example
 ```
