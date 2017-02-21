@@ -15,6 +15,7 @@ A Search command to explore Elasticsearch data within Splunk.
 
 # Included
 - elasticsearch-py
+- urllib3
 - splunklib from the splunk-sdk-python
 
 # Example
