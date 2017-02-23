@@ -9,12 +9,16 @@ import re
 import sys
 import json
 import time
+from pprint import pprint
 from elasticsearch import Elasticsearch, helpers
 from splunklib.searchcommands import \
     dispatch, GeneratingCommand, Configuration, Option, validators
 
 
+# Elasticsearch document metadata keys
 ES_KEYS = ("_index", "_type", "_id", "_score")
+
+# Time units for relative time conversion
 UNITS = {
     "s": 1,
     "m": 60,
@@ -24,13 +28,19 @@ UNITS = {
     "y": 31104000,
 }
 
+# Supported actions
+ACTION_SEARCH = "search"
+ACTION_INDICES_LIST = "indices-list"
+ACTION_CLUSTER_HEALTH = "cluster-health"
+
 
 @Configuration()
 class ElasticSplunk(GeneratingCommand):
     """ElasticSplunk custom search command"""
 
+    action = Option(require=False, default=ACTION_SEARCH, doc="[search,indices-list,cluster-health")
     eaddr = Option(require=True, default=None, doc="[https]server:port,[https]server:port or config item")
-    index = Option(require=True, default=None, doc="Index to search")
+    index = Option(require=False, default=None, doc="Index to search")
     #index = Option(require=False, default="_all", doc="Index to search")
     scan = Option(require=False, default=True, doc="Perform a scan search")
     stype = Option(require=False, default=None, doc="Source/doc_type")
@@ -143,7 +153,7 @@ class ElasticSplunk(GeneratingCommand):
         return config
 
 
-    def _parse_event(self, config, hit):
+    def _parse_hit(self, config, hit):
         """Parse a Elasticsearch Hit"""
 
         event = {}
@@ -162,11 +172,30 @@ class ElasticSplunk(GeneratingCommand):
         return event
 
 
-    def generate(self):
-        """Search Generate events to Splunk from a Elasticsearch search"""
+    def _list_indices(self, esclient):
+        """List indices in given Elasticsearch nodes"""
 
-        # Get search config
-        config = self._get_search_config()
+        indices = esclient.indices.get('*')
+        for name in indices:
+            pprint(name)
+            event = {}
+            event["_time"] = int(time.time())
+            event["name"] = name
+            event["aliases"] = ",".join(indices[name]["aliases"].keys())
+            event["mappings"] = ",".join(indices[name]["mappings"].keys())
+            event["creation_date"] = indices[name]["settings"]["index"]["creation_date"]
+            event["number_of_shards"] = indices[name]["settings"]["index"]["number_of_shards"]
+            event["uuid"] = indices[name]["settings"]["index"]["uuid"]
+            yield event
+
+    def _cluster_health(self, esclient):
+        """Fetch cluster status"""
+        status = esclient.cluster.health()
+        status["_time"] = int(time.time())
+        yield status
+
+    def _search(self, esclient, config):
+        """Search Generate events to Splunk from a Elasticsearch search"""
 
         # Search body
         # query-string-syntax
@@ -190,12 +219,6 @@ class ElasticSplunk(GeneratingCommand):
             }
         }
 
-        # Create Elasticsearch client
-        esclient = Elasticsearch(
-            config["hosts"],
-            verify_certs=config["verify_certs"],
-            use_ssl=config["use_ssl"])
-
         # Execute search
         if self.scan:
             res = helpers.scan(esclient,
@@ -205,7 +228,7 @@ class ElasticSplunk(GeneratingCommand):
                                doc_type=config["stype"],
                                query=body)
             for hit in res:
-                yield self._parse_event(config, hit)
+                yield self._parse_hit(config, hit)
         else:
             res = esclient.search(index=config["index"],
                                   size=config["limit"],
@@ -213,6 +236,25 @@ class ElasticSplunk(GeneratingCommand):
                                   doc_type=config["stype"],
                                   body=body)
             for hit in res['hits']['hits']:
-                yield self._parse_event(config, hit)
+                yield self._parse_hit(config, hit)
+
+    def generate(self):
+        """Generate events to Splunk"""
+
+        # Get config
+        config = self._get_search_config()
+
+        # Create Elasticsearch client
+        esclient = Elasticsearch(
+            config["hosts"],
+            verify_certs=config["verify_certs"],
+            use_ssl=config["use_ssl"])
+
+        if self.action == ACTION_SEARCH:
+            return self._search(esclient, config)
+        if self.action == ACTION_INDICES_LIST:
+            return self._list_indices(esclient)
+        if self.action == ACTION_CLUSTER_HEALTH:
+            return self._cluster_health(esclient)
 
 dispatch(ElasticSplunk, sys.argv, sys.stdin, sys.stdout, __name__)
