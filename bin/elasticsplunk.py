@@ -15,9 +15,6 @@ from splunklib.searchcommands import \
     dispatch, GeneratingCommand, Configuration, Option, validators
 
 
-# Elasticsearch document metadata keys
-ES_KEYS = ("_index", "_type", "_id", "_score")
-
 # Time units for relative time conversion
 UNITS = {
     "s": 1,
@@ -28,23 +25,48 @@ UNITS = {
     "y": 31104000,
 }
 
+# Elasticsearch document metadata keys
+KEYS_ELASTIC = ("_index", "_type", "_id", "_score")
+KEY_ELASTIC_SOURCE = "_source"
+
 # Supported actions
 ACTION_SEARCH = "search"
 ACTION_INDICES_LIST = "indices-list"
 ACTION_CLUSTER_HEALTH = "cluster-health"
 
+# Config keys
+KEY_CONFIG_EADDR = "hosts"
+KEY_CONFIG_TIMESTAMP = "tsfield"
+KEY_CONFIG_USE_SSL = "use_ssl"
+KEY_CONFIG_VERIFY_CERTS = "verify_certs"
+KEY_CONFIG_FIELDS = "fields"
+KEY_CONFIG_SOURCE_TYPE = "stype"
+KEY_CONFIG_LATEST = "latest"
+KEY_CONFIG_EARLIEST = "earliest"
+KEY_CONFIG_SCAN = "scan"
+KEY_CONFIG_INDEX = "index"
+KEY_CONFIG_INCLUDE_ES = "include_es"
+KEY_CONFIG_INCLUDE_RAW = "include_raw"
+KEY_CONFIG_LIMIT = "limit"
+KEY_CONFIG_QUERY = "query"
+
+# Splunk keys
+KEY_SPLUNK_TIMESTAMP = "_time"
+KEY_SPLUNK_EARLIEST = "startTime"
+KEY_SPLUNK_LATEST = "endTime"
+KEY_SPLUNK_RAW = "_raw"
 
 @Configuration()
 class ElasticSplunk(GeneratingCommand):
     """ElasticSplunk custom search command"""
 
     action = Option(require=False, default=ACTION_SEARCH, doc="[search,indices-list,cluster-health")
-    eaddr = Option(require=True, default=None, doc="[https]server:port,[https]server:port or config item")
+    eaddr = Option(require=True, default=None, doc="server:port,server:port or config item")
     index = Option(require=False, default=None, doc="Index to search")
     #index = Option(require=False, default="_all", doc="Index to search")
     scan = Option(require=False, default=True, doc="Perform a scan search")
     stype = Option(require=False, default=None, doc="Source/doc_type")
-    tsfield = Option(require=False, default=None, doc="Field holding the event timestamp")
+    tsfield = Option(require=False, default="@timestamp", doc="Field holding the event timestamp")
     query = Option(require=False, default="*", doc="Query string in ES DSL")
     fields = Option(require=False, default=None, doc="Only include selected fields")
     limit = Option(require=False, default=10000, doc="Max number of hits")
@@ -101,54 +123,52 @@ class ElasticSplunk(GeneratingCommand):
         if self.eaddr in config:
             config = config[self.eaddr]
         else:
-            config["hosts"] = self.eaddr.split(",")
+            config[KEY_CONFIG_EADDR] = self.eaddr.split(",")
 
-        if self.tsfield:
-            config["tsfield"] = self.tsfield
-        elif "tsfield" not in config:
-            config["tsfield"] = "time"
+        if KEY_CONFIG_TIMESTAMP not in config:
+            config[KEY_CONFIG_TIMESTAMP] = self.tsfield
             # raise Exception("Required tsfield parameter not specified")
 
         # Handle SSL connections
         if self.use_ssl != None:
-            config["use_ssl"] = True if self.use_ssl == "true" else False
-        elif "use_ssl" not in config:
-            config["use_ssl"] = False
+            config[KEY_CONFIG_USE_SSL] = True if self.use_ssl == "true" else False
+        elif KEY_CONFIG_USE_SSL not in config:
+            config[KEY_CONFIG_USE_SSL] = False
 
-        if not config["use_ssl"]:
-            config["verify_certs"] = False
+        if not config[KEY_CONFIG_USE_SSL]:
+            config[KEY_CONFIG_VERIFY_CERTS] = False
         elif self.verify_certs != None:
-            config["verify_certs"] = True if self.verify_certs == "true" else False
-        elif "verify_certs" not in config:
-            config["verify_certs"] = False
+            config[KEY_CONFIG_VERIFY_CERTS] = True if self.verify_certs == "true" else False
+        elif KEY_CONFIG_VERIFY_CERTS not in config:
+            config[KEY_CONFIG_VERIFY_CERTS] = False
 
         # Fields to fetch
         if self.fields:
-            config["fields"] = self.fields.split(",")
-            if not config["tsfield"] in config["fields"]:
-                config["fields"].append(config["tsfield"])
+            config[KEY_CONFIG_FIELDS] = self.fields.split(",")
+            if not config[KEY_CONFIG_TIMESTAMP] in config[KEY_CONFIG_FIELDS]:
+                config[KEY_CONFIG_FIELDS].append(config[KEY_CONFIG_TIMESTAMP])
         else:
-            config["fields"] = None
+            config[KEY_CONFIG_FIELDS] = None
 
         # source type
-        config["stype"] = self.stype.split(",") if self.stype else None
+        config[KEY_CONFIG_SOURCE_TYPE] = self.stype.split(",") if self.stype else None
 
-        if hasattr(self.search_results_info, "endTime"):
-            config["latest"] = int(self.search_results_info.endTime)
+        if hasattr(self.search_results_info, KEY_SPLUNK_LATEST):
+            config[KEY_CONFIG_LATEST] = int(self.search_results_info.endTime)
         else:
-            config["latest"] = self.parse_dates(self.latest)
+            config[KEY_CONFIG_LATEST] = self.parse_dates(self.latest)
 
-        if hasattr(self.search_results_info, "startTime"):
-            config["earliest"] = int(self.search_results_info.startTime)
+        if hasattr(self.search_results_info, KEY_SPLUNK_EARLIEST):
+            config[KEY_CONFIG_EARLIEST] = int(self.search_results_info.startTime)
         else:
-            config["earliest"] = config["latest"] - self.parse_dates(self.earliest)
+            config[KEY_CONFIG_EARLIEST] = config[KEY_CONFIG_LATEST] - self.parse_dates(self.earliest)
 
-        config["scan"] = self.scan
-        config["index"] = self.index
-        config["include_es"] = self.include_es
-        config["include_raw"] = self.include_raw
-        config["limit"] = self.limit
-        config["query"] = self.query
+        config[KEY_CONFIG_SCAN] = self.scan
+        config[KEY_CONFIG_INDEX] = self.index
+        config[KEY_CONFIG_INCLUDE_ES] = self.include_es
+        config[KEY_CONFIG_INCLUDE_RAW] = self.include_raw
+        config[KEY_CONFIG_LIMIT] = self.limit
+        config[KEY_CONFIG_QUERY] = self.query
 
         return config
 
@@ -157,17 +177,17 @@ class ElasticSplunk(GeneratingCommand):
         """Parse a Elasticsearch Hit"""
 
         event = {}
-        event["_time"] = hit["_source"][config["tsfield"]]
-        for key in hit["_source"]:
-            if key != config["tsfield"]:
-                event[key] = hit["_source"][key]
+        event[KEY_SPLUNK_TIMESTAMP] = hit[KEY_ELASTIC_SOURCE][config[KEY_CONFIG_TIMESTAMP]]
+        for key in hit[KEY_ELASTIC_SOURCE]:
+            if key != config[KEY_CONFIG_TIMESTAMP]:
+                event[key] = hit[KEY_ELASTIC_SOURCE][key]
 
-        if config["include_es"]:
-            for key in ES_KEYS:
+        if config[KEY_CONFIG_INCLUDE_ES]:
+            for key in KEYS_ELASTIC:
                 event["es{0}".format(key)] = hit[key]
 
-        if config["include_raw"]:
-            event["_raw"] = json.dumps(hit)
+        if config[KEY_CONFIG_INCLUDE_RAW]:
+            event[KEY_SPLUNK_RAW] = json.dumps(hit)
 
         return event
 
@@ -179,7 +199,7 @@ class ElasticSplunk(GeneratingCommand):
         for name in indices:
             pprint(name)
             event = {}
-            event["_time"] = int(time.time())
+            event[KEY_SPLUNK_TIMESTAMP] = int(time.time())
             event["name"] = name
             event["aliases"] = ",".join(indices[name]["aliases"].keys())
             event["mappings"] = ",".join(indices[name]["mappings"].keys())
@@ -191,7 +211,7 @@ class ElasticSplunk(GeneratingCommand):
     def _cluster_health(self, esclient):
         """Fetch cluster status"""
         status = esclient.cluster.health()
-        status["_time"] = int(time.time())
+        status[KEY_SPLUNK_TIMESTAMP] = int(time.time())
         yield status
 
     def _search(self, esclient, config):
@@ -201,18 +221,18 @@ class ElasticSplunk(GeneratingCommand):
         # query-string-syntax
         # www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-query-string-query.html
         body = {
-            "sort":[{config["tsfield"]:{"order": "asc"}}],
+            "sort":[{config[KEY_CONFIG_TIMESTAMP]:{"order": "asc"}}],
             "query": {
                 "bool": {
                     "must": [
                         {"range": {
-                            config["tsfield"]: {
-                                "gte": config["earliest"],
-                                "lte": config["latest"],
+                            config[KEY_CONFIG_TIMESTAMP]: {
+                                "gte": config[KEY_CONFIG_EARLIEST],
+                                "lte": config[KEY_CONFIG_LATEST],
                             }
                         }},
                         {"query_string" : {
-                            "query" : config["query"],
+                            "query" : config[KEY_CONFIG_QUERY],
                         }}
                     ]
                 }
@@ -222,18 +242,18 @@ class ElasticSplunk(GeneratingCommand):
         # Execute search
         if self.scan:
             res = helpers.scan(esclient,
-                               size=config["limit"],
-                               index=config["index"],
-                               _source_include=config["fields"],
-                               doc_type=config["stype"],
+                               size=config[KEY_CONFIG_LIMIT],
+                               index=config[KEY_CONFIG_INDEX],
+                               _source_include=config[KEY_CONFIG_FIELDS],
+                               doc_type=config[KEY_CONFIG_SOURCE_TYPE],
                                query=body)
             for hit in res:
                 yield self._parse_hit(config, hit)
         else:
-            res = esclient.search(index=config["index"],
-                                  size=config["limit"],
-                                  _source_include=config["fields"],
-                                  doc_type=config["stype"],
+            res = esclient.search(index=config[KEY_CONFIG_INDEX],
+                                  size=config[KEY_CONFIG_LIMIT],
+                                  _source_include=config[KEY_CONFIG_FIELDS],
+                                  doc_type=config[KEY_CONFIG_SOURCE_TYPE],
                                   body=body)
             for hit in res['hits']['hits']:
                 yield self._parse_hit(config, hit)
@@ -246,9 +266,9 @@ class ElasticSplunk(GeneratingCommand):
 
         # Create Elasticsearch client
         esclient = Elasticsearch(
-            config["hosts"],
-            verify_certs=config["verify_certs"],
-            use_ssl=config["use_ssl"])
+            config[KEY_CONFIG_EADDR],
+            verify_certs=config[KEY_CONFIG_VERIFY_CERTS],
+            use_ssl=config[KEY_CONFIG_USE_SSL])
 
         if self.action == ACTION_SEARCH:
             return self._search(esclient, config)
