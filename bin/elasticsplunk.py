@@ -205,6 +205,7 @@ class ElasticSplunk(GeneratingCommand):
             event["mappings"] = ",".join(indices[name]["mappings"].keys())
             event["creation_date"] = indices[name]["settings"]["index"]["creation_date"]
             event["number_of_shards"] = indices[name]["settings"]["index"]["number_of_shards"]
+            event["number_of_replicas"] = indices[name]["settings"]["index"]["number_of_replicas"]
             event["uuid"] = indices[name]["settings"]["index"]["uuid"]
             yield event
 
