@@ -230,6 +230,7 @@ class ElasticSplunk(GeneratingCommand):
                             config[KEY_CONFIG_TIMESTAMP]: {
                                 "gte": config[KEY_CONFIG_EARLIEST],
                                 "lte": config[KEY_CONFIG_LATEST],
+                                "format": "epoch_second",
                             }
                         }},
                         {"query_string" : {
