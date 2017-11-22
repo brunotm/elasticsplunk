@@ -188,7 +188,10 @@ class ElasticSplunk(GeneratingCommand):
         event[KEY_SPLUNK_TIMESTAMP] = hit[KEY_ELASTIC_SOURCE][config[KEY_CONFIG_TIMESTAMP]]
         for key in hit[KEY_ELASTIC_SOURCE]:
             if key != config[KEY_CONFIG_TIMESTAMP]:
-                event[key] = hit[KEY_ELASTIC_SOURCE][key]
+                if isinstance(hit[KEY_ELASTIC_SOURCE][key], dict):
+                    event.update(_flattern(key, hit[KEY_ELASTIC_SOURCE][key]))
+                else:
+                    event[key] = hit[KEY_ELASTIC_SOURCE][key]
 
         if config[KEY_CONFIG_INCLUDE_ES]:
             for key in KEYS_ELASTIC:
@@ -286,5 +289,15 @@ class ElasticSplunk(GeneratingCommand):
             return self._list_indices(esclient)
         if self.action == ACTION_CLUSTER_HEALTH:
             return self._cluster_health(esclient)
+
+def _flattern(key, data):
+    result = {}
+    for inkey in data:
+        if isinstance(data[inkey], dict):
+            for inkey2, value in _flattern(inkey, data[inkey]).items():
+                result[key+"."+inkey2] = value
+        else:
+            result[key+"."+inkey] = data[inkey]
+    return result
 
 dispatch(ElasticSplunk, sys.argv, sys.stdin, sys.stdout, __name__)
