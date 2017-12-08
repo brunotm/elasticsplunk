@@ -22,12 +22,8 @@ def get_host_info(node_info, host):
     :arg node_info: node information from `/_cluster/nodes`
     :arg host: connection information (host, port) extracted from the node info
     """
-    attrs = node_info.get('attributes', {})
-
     # ignore master only nodes
-    if (attrs.get('data', 'true') == 'false' and
-        attrs.get('client', 'false') == 'false' and
-        attrs.get('master', 'true') == 'true'):
+    if node_info.get('roles', []) == ['master']:
         return None
     return host
 
@@ -78,7 +74,7 @@ class Transport(object):
             will be serialized and passed as a query parameter `source`.
 
         Any extra keyword arguments will be passed to the `connection_class`
-        when creating and instance unless overriden by that connection's
+        when creating and instance unless overridden by that connection's
         options provided as part of the hosts parameter.
         """
 
@@ -155,12 +151,6 @@ class Transport(object):
             # previously unseen params, create new connection
             kwargs = self.kwargs.copy()
             kwargs.update(host)
-
-            if 'scheme' in host and host['scheme'] != self.connection_class.transport_schema:
-                raise ImproperlyConfigured(
-                    'Scheme specified in connection (%s) is not the same as the connection class (%s) specifies (%s).' % (
-                        host['scheme'], self.connection_class.__name__, self.connection_class.transport_schema
-                ))
             return self.connection_class(**kwargs)
         connections = map(_create_connection, hosts)
 
@@ -203,7 +193,8 @@ class Transport(object):
             for c in chain(self.connection_pool.connections, self.seed_connections):
                 try:
                     # use small timeout for the sniffing request, should be a fast api call
-                    _, headers, node_info = c.perform_request('GET', '/_nodes/_all/clear',
+                    _, headers, node_info = c.perform_request(
+                        'GET', '/_nodes/_all/http',
                         timeout=self.sniff_timeout if not initial else None)
                     node_info = self.deserializer.loads(node_info, headers.get('content-type'))
                     break
@@ -219,21 +210,15 @@ class Transport(object):
         return list(node_info['nodes'].values())
 
     def _get_host_info(self, host_info):
-        address_key = self.connection_class.transport_schema + '_address'
         host = {}
-        address = host_info.get(address_key, '')
-        if '/' in address:
-            host['host'], address = address.split('/', 1)
+        address = host_info.get('http', {}).get('publish_address')
 
-        # malformed address
-        if ':' not in address:
+        # malformed or no address given
+        if not address or ':' not in address:
             return None
 
-        ip, port = address.rsplit(':', 1)
-
-        # use the ip if not overridden by publish_host
-        host.setdefault('host', ip)
-        host['port'] = int(port)
+        host['host'], host['port'] = address.rsplit(':', 1)
+        host['port'] = int(host['port'])
 
         return self.host_info_callback(host_info, host)
 
@@ -251,8 +236,8 @@ class Transport(object):
 
         hosts = list(filter(None, (self._get_host_info(n) for n in node_info)))
 
-        # we weren't able to get any nodes, maybe using an incompatible
-        # transport_schema or host_info_callback blocked all - raise error.
+        # we weren't able to get any nodes or host_info_callback blocked all -
+        # raise error.
         if not hosts:
             raise TransportError("N/A", "Unable to sniff hosts - no viable hosts found.")
 
@@ -270,7 +255,7 @@ class Transport(object):
         if self.sniff_on_connection_fail:
             self.sniff_hosts()
 
-    def perform_request(self, method, url, params=None, body=None):
+    def perform_request(self, method, url, headers=None, params=None, body=None):
         """
         Perform the actual request. Retrieve a connection from the connection
         pool, pass all the information to it's perform_request method and
@@ -284,6 +269,8 @@ class Transport(object):
 
         :arg method: HTTP method to use
         :arg url: absolute url (without host) to target
+        :arg headers: dictionary of headers, will be handed over to the
+            underlying :class:`~elasticsearch.Connection` class
         :arg params: dictionary of query parameters, will be handed over to the
             underlying :class:`~elasticsearch.Connection` class for serialization
         :arg body: body of the request, will be serializes using serializer and
@@ -307,7 +294,7 @@ class Transport(object):
 
         if body is not None:
             try:
-                body = body.encode('utf-8')
+                body = body.encode('utf-8', 'surrogatepass')            
             except (UnicodeDecodeError, AttributeError):
                 # bytes/str - no need to re-encode
                 pass
@@ -324,7 +311,7 @@ class Transport(object):
             connection = self.get_connection()
 
             try:
-                status, headers, data = connection.perform_request(method, url, params, body, ignore=ignore, timeout=timeout)
+                status, headers, data = connection.perform_request(method, url, params, body, headers=headers, ignore=ignore, timeout=timeout)
 
             except TransportError as e:
                 if method == 'HEAD' and e.status_code == 404:

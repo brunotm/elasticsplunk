@@ -24,8 +24,6 @@ class Connection(object):
 
     Also responsible for logging.
     """
-    transport_schema = 'http'
-
     def __init__(self, host='localhost', port=9200, use_ssl=False, url_prefix='', timeout=10, **kwargs):
         """
         :arg host: hostname of the node (default: localhost)
@@ -33,9 +31,12 @@ class Connection(object):
         :arg url_prefix: optional url prefix for elasticsearch
         :arg timeout: default timeout in seconds (float, default: 10)
         """
-        scheme = self.transport_schema
-        if use_ssl:
-            scheme += 's'
+        scheme = kwargs.get('scheme', 'http')
+        if use_ssl or scheme == 'https':
+            scheme = 'https'
+            use_ssl = True
+        self.use_ssl = use_ssl
+
         self.host = '%s://%s:%s' % (scheme, host, port)
         if url_prefix:
             url_prefix = '/' + url_prefix.strip('/')
@@ -61,7 +62,9 @@ class Connection(object):
         path = path.replace('?', '?pretty&', 1) if '?' in path else path + '?pretty'
         if self.url_prefix:
             path = path.replace(self.url_prefix, '', 1)
-        tracer.info("curl -X%s 'http://localhost:9200%s' -d '%s'", method, path, self._pretty_json(body) if body else '')
+        tracer.info("curl %s-X%s 'http://localhost:9200%s' -d '%s'",
+                    "-H 'Content-Type: application/json' " if body else '',
+                    method, path, self._pretty_json(body) if body else '')
 
         if tracer.isEnabledFor(logging.DEBUG):
             tracer.debug('#[%s] (%.3fs)\n#%s', status_code, duration, self._pretty_json(response).replace('\n', '\n#') if response else '')
@@ -73,7 +76,7 @@ class Connection(object):
         # body has already been serialized to utf-8, deserialize it for logging
         # TODO: find a better way to avoid (de)encoding the body back and forth
         if body:
-            body = body.decode('utf-8')
+            body = body.decode('utf-8', 'ignore')
 
         logger.info(
             '%s %s [status:%s request:%.3fs]', method, full_url,
@@ -97,7 +100,7 @@ class Connection(object):
         # body has already been serialized to utf-8, deserialize it for logging
         # TODO: find a better way to avoid (de)encoding the body back and forth
         if body:
-            body = body.decode('utf-8')
+            body = body.decode('utf-8', 'ignore')
 
         logger.debug('> %s', body)
 
