@@ -3,7 +3,7 @@ from __future__ import unicode_literals
 import weakref
 from datetime import date, datetime
 from functools import wraps
-from ..compat import string_types, quote_plus
+from ..compat import string_types, quote_plus, PY2
 
 # parts of URL to be omitted
 SKIP_IN_PATH = (None, '', b'', [], ())
@@ -26,13 +26,16 @@ def _escape(value):
     elif isinstance(value, bool):
         value = str(value).lower()
 
+    # don't decode bytestrings
+    elif isinstance(value, bytes):
+        return value
+
     # encode strings to utf-8
     if isinstance(value, string_types):
-        try:
+        if PY2 and isinstance(value, unicode):
             return value.encode('utf-8')
-        except UnicodeDecodeError:
-            # Python 2 and str, no need to re-encode
-            pass
+        if not PY2 and isinstance(value, str):
+            return value.encode('utf-8')
 
     return str(value)
 
@@ -47,7 +50,7 @@ def _make_path(*parts):
         quote_plus(_escape(p), b',*') for p in parts if p not in SKIP_IN_PATH)
 
 # parameters that apply to all methods
-GLOBAL_PARAMS = ('pretty', 'format', 'filter_path')
+GLOBAL_PARAMS = ('pretty', 'human', 'error_trace', 'format', 'filter_path')
 
 def query_params(*es_query_params):
     """
@@ -57,7 +60,9 @@ def query_params(*es_query_params):
     def _wrapper(func):
         @wraps(func)
         def _wrapped(*args, **kwargs):
-            params = kwargs.pop('params', {})
+            params = {}
+            if 'params' in kwargs:
+                params = kwargs.pop('params').copy()
             for p in es_query_params + GLOBAL_PARAMS:
                 if p in kwargs:
                     v = kwargs.pop(p)

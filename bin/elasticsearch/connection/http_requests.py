@@ -32,9 +32,10 @@ class RequestsHttpConnection(Connection):
         if not REQUESTS_AVAILABLE:
             raise ImproperlyConfigured("Please install requests to use RequestsHttpConnection.")
 
-        super(RequestsHttpConnection, self).__init__(host=host, port=port, **kwargs)
+        super(RequestsHttpConnection, self).__init__(host=host, port=port, use_ssl=use_ssl, **kwargs)
         self.session = requests.Session()
-        self.session.headers = headers
+        self.session.headers = headers or {}
+        self.session.headers.setdefault('content-type', 'application/json')
         if http_auth is not None:
             if isinstance(http_auth, (tuple, list)):
                 http_auth = tuple(http_auth)
@@ -42,7 +43,7 @@ class RequestsHttpConnection(Connection):
                 http_auth = tuple(http_auth.split(':', 1))
             self.session.auth = http_auth
         self.base_url = 'http%s://%s:%d%s' % (
-            's' if use_ssl else '',
+            's' if self.use_ssl else '',
             host, port, self.url_prefix
         )
         self.session.verify = verify_certs
@@ -56,28 +57,31 @@ class RequestsHttpConnection(Connection):
                 raise ImproperlyConfigured("You cannot pass CA certificates when verify SSL is off.")
             self.session.verify = ca_certs
 
-        if use_ssl and not verify_certs:
+        if self.use_ssl and not verify_certs:
             warnings.warn(
                 'Connecting to %s using SSL with verify_certs=False is insecure.' % self.base_url)
 
-    def perform_request(self, method, url, params=None, body=None, timeout=None, ignore=()):
+    def perform_request(self, method, url, params=None, body=None, timeout=None, ignore=(), headers=None):
         url = self.base_url + url
         if params:
             url = '%s?%s' % (url, urlencode(params or {}))
 
         start = time.time()
+        request = requests.Request(method=method, headers=headers, url=url, data=body)
+        prepared_request = self.session.prepare_request(request)
+        settings = self.session.merge_environment_settings(prepared_request.url, {}, None, None, None)
+        send_kwargs = {'timeout': timeout or self.timeout}
+        send_kwargs.update(settings)
         try:
-            response = self.session.request(method, url, data=body, timeout=timeout or self.timeout)
+            response = self.session.send(prepared_request, **send_kwargs)
             duration = time.time() - start
             raw_data = response.text
-        except requests.exceptions.SSLError as e:
-            self.log_request_fail(method, url, response.request.path_url, body, time.time() - start, exception=e)
-            raise SSLError('N/A', str(e), e)
-        except requests.Timeout as e:
-            self.log_request_fail(method, url, response.request.path_url, body, time.time() - start, exception=e)
-            raise ConnectionTimeout('TIMEOUT', str(e), e)
-        except requests.ConnectionError as e:
-            self.log_request_fail(method, url, response.request.path_url, body, time.time() - start, exception=e)
+        except Exception as e:
+            self.log_request_fail(method, url, prepared_request.path_url, body, time.time() - start, exception=e)
+            if isinstance(e, requests.exceptions.SSLError):
+                raise SSLError('N/A', str(e), e)
+            if isinstance(e, requests.Timeout):
+                raise ConnectionTimeout('TIMEOUT', str(e), e)
             raise ConnectionError('N/A', str(e), e)
 
         # raise errors based on http status codes, let the client handle those if needed
