@@ -253,7 +253,7 @@ class ElasticSplunk(GeneratingCommand):
         }
 
         # Execute search
-        if self.scan:
+        if self.scan in [True, "true", "True", 1, "y"]:
             res = helpers.scan(esclient,
                                size=config[KEY_CONFIG_LIMIT],
                                index=config[KEY_CONFIG_INDEX],
