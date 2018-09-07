@@ -171,7 +171,7 @@ class ElasticSplunk(GeneratingCommand):
         else:
             config[KEY_CONFIG_EARLIEST] = config[KEY_CONFIG_LATEST] - self.parse_dates(DEFAULT_EARLIEST)
 
-        config[KEY_CONFIG_SCAN] = self.scan
+        config[KEY_CONFIG_SCAN] = True if self.scan in [True, "true", "True", 1, "y"] else False
         config[KEY_CONFIG_INDEX] = self.index
         config[KEY_CONFIG_INCLUDE_ES] = self.include_es
         config[KEY_CONFIG_INCLUDE_RAW] = self.include_raw
@@ -253,7 +253,7 @@ class ElasticSplunk(GeneratingCommand):
         }
 
         # Execute search
-        if self.scan in [True, "true", "True", 1, "y"]:
+        if config[KEY_CONFIG_SCAN]:
             res = helpers.scan(esclient,
                                size=config[KEY_CONFIG_LIMIT],
                                index=config[KEY_CONFIG_INDEX],
